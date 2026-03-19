@@ -5,24 +5,17 @@ import json
 import pandas as pd
 import numpy as np
 from factor_analysis import (
-    winsorize, standardize, run_backtest, compute_performance,
-    calc_jump_intensity,calc_jump_volatility_ratio,
-    calc_jump_momentum, calc_jump_skewness, calc_jump_kurtosis,
-    calc_jump_reversal_gap, calc_jump_concentration,
-    calc_jump_overnight_gap, calc_jump_recovery_speed
+    winsorize, standardize, run_backtest, compute_performance,calc_jump_volatility_ratio,
+    calc_jump_momentum, calc_jump_skewness, calc_jump_bipower
 )
 
 # ==================== 因子函数映射字典 ====================
 FACTOR_FUNCTIONS = {
-    "jump_intensity": calc_jump_intensity,
+    "jump_bipower": calc_jump_bipower,
     "jump_volatility_ratio": calc_jump_volatility_ratio,
     "jump_momentum": calc_jump_momentum,
     "jump_skewness": calc_jump_skewness,
-    "jump_kurtosis": calc_jump_kurtosis,
-    "jump_reversal_gap": calc_jump_reversal_gap,
-    "jump_concentration": calc_jump_concentration,
-    "jump_overnight_gap": calc_jump_overnight_gap,
-    "jump_recovery_speed": calc_jump_recovery_speed,
+
 }
 
 # ==================== 回测参数 ====================
@@ -67,12 +60,13 @@ def backtest_factor(factor, forward_ret, name=""):
         return None
 
 # ==================== 参数配置 ====================
-TARGET_FACTOR_NAME = "jump_intensity"          # 目标因子名称（可从字典的键中选择）
-DEFAULT_PARAMS = {"window": 20, "threshold": 2}  # 默认参数（仅用于对比）
+TARGET_FACTOR_NAME = "jump_volatility_ratio"       # 目标因子名称（可从字典的键中选择）
+DEFAULT_PARAMS = {"short_window":5, "long_window":25}  # 默认参数（仅用于对比）
 
 PARAM_GRID = {
-    "window": [10, 20, 40],
-    "threshold": [1.5, 2.0, 2.5]
+    "short_window": [i for i in range(5)],
+    "long_window": [i for i in range(20,40)],
+
 }
 
 OUTPUT_BEST_PARAMS_FILE = "best_params.json"   # 最佳参数保存文件
@@ -98,16 +92,16 @@ if __name__ == "__main__":
     best_perf = None
     results = []
 
-    for w in PARAM_GRID["window"]:
-        for t in PARAM_GRID["threshold"]:
-            params = {"window": w, "threshold": t}
+    for sw in PARAM_GRID["short_window"]:
+        for lw in PARAM_GRID["long_window"]:
+            params = {"short_window":sw, "long_window":lw}
             factor = compute_factor(close_wide, target_func, params)
-            perf = backtest_factor(factor, forward_ret, name=f"{TARGET_FACTOR_NAME}(w={w},t={t})")
+            perf = backtest_factor(factor, forward_ret, name=f"{TARGET_FACTOR_NAME}(sw={sw},lw={lw})")
             if perf is not None:
                 sharpe = perf["夏普比率"]
                 results.append({
-                    "window": w,
-                    "threshold": t,
+                    "short_window": sw,
+                    "long_window": lw,
                     "年化收益率": perf["年化收益率"],
                     "夏普比率": sharpe,
                     "最大回撤": perf["最大回撤"]

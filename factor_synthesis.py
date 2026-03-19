@@ -13,14 +13,14 @@ from factor_optimization import (
 )
 
 # ==================== 参数配置 ====================
-TARGET_FACTOR_NAME = "jump_intensity"
-DEFAULT_PARAMS = {"window": 20, "threshold": 2}
+TARGET_FACTOR_NAME = "jump_momentum"
+DEFAULT_PARAMS = {"window": 42, "momentum_window": 15}
 
 # 合成因子配置列表 (名称, 参数字典) - 只定义名称和参数，函数从FACTOR_FUNCTIONS获取
 SYNTHESIS_FACTOR_CONFIGS = [
-    ("jump_intensity", {"window": 20, "threshold": 2}),
-    ("jump_volatility_ratio", {"short_window": 5, "long_window": 20}),
-    ("jump_momentum", {"window": 20, "momentum_window": 5}),
+    ("jump_skewness", {"window": 21}),
+    ("jump_bipower", {"window": 51}),
+    ("jump_volatility_ratio", {"short_window": 3, "long_window": 25}),
     # 可继续添加其他因子配置
 ]
 

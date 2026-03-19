@@ -19,19 +19,31 @@ plt.rcParams['axes.unicode_minus'] = False
 # 所有因子函数均以收盘价宽表（DataFrame，index为日期，columns为股票代码）为输入，
 # 返回相同结构的因子值DataFrame。
 
-def calc_jump_intensity(close, window=20, threshold=2):
+def calc_jump_bipower(close, window=51):
     """
-    跳跃强度因子：近期异常收益（|收益|>threshold*标准差）的天数占比
-    因子越大 = 近期跳跃越频繁 = 越可能高估
+    基于BN-S双幂次变差思想的日频跳跃波动因子
+    参数:
+        close: pd.Series, 日频收盘价序列
+        window: int, 滚动窗口长度（默认20天）
+    返回:
+        pd.Series, 每个交易日对应的跳跃波动估计值（非负）
     """
-    ret = close.pct_change()
-    mean_ret = ret.rolling(window).mean()
-    std_ret = ret.rolling(window).std()
-    z_score = (ret - mean_ret) / std_ret
-    jump_days = (z_score.abs() > threshold).rolling(window).sum()
-    return jump_days / window
+    ret = close.pct_change().dropna()  # 日收益率
+    # 计算滚动窗口内的已实现方差 RV
+    rv = (ret ** 2).rolling(window).sum()
+    # 计算滚动窗口内的双幂次变差 BV (注意需要相邻收益率)
+    # 方法：构造相邻收益率的绝对值乘积，然后滚动求和，乘以 pi/2
+    abs_ret = ret.abs()
+    bipower_core = abs_ret * abs_ret.shift(1)  # |r_t| * |r_{t-1}|
+    bv = (np.pi / 2) * bipower_core.rolling(window).sum()
+    # 跳跃波动 = max(RV - BV, 0)
+    jump = (rv - bv).clip(lower=0)
+    # 返回与close对齐的结果（前window天为NaN）
+    return jump.reindex(close.index, fill_value=np.nan)
 
-def calc_jump_momentum(close, window=20, momentum_window=60):
+
+
+def calc_jump_momentum(close, window=42, momentum_window=15):
     """
     跳跃动量因子：跳跃日后的累计收益
     因子越大 = 跳跃后涨得越多 = 越可能高估
@@ -40,10 +52,10 @@ def calc_jump_momentum(close, window=20, momentum_window=60):
     std_ret = ret.rolling(window).std()
     is_jump = ret.abs() > 2 * std_ret
     jump_ret = ret * is_jump
-    return jump_ret.rolling(momentum_window).sum()
+    return -jump_ret.rolling(momentum_window).sum()
 
 
-def calc_jump_volatility_ratio(close, short_window=5, long_window=20):
+def calc_jump_volatility_ratio(close, short_window=3, long_window=25):
     """
     波动率突变因子：短期波动率 / 长期波动率
     因子越大 = 近期波动突然放大 = 越可能高估
@@ -53,77 +65,27 @@ def calc_jump_volatility_ratio(close, short_window=5, long_window=20):
     vol_long = ret.rolling(long_window).std()
     return vol_short / vol_long
 
-def calc_jump_skewness(close, window=20):
+def calc_jump_skewness(close, window=21):
     """
     收益偏度因子：正偏度表示右尾厚（向上跳跃多）
     因子越大 = 向上跳跃风险大 = 越可能高估
     """
     ret = close.pct_change()
-    return ret.rolling(window).skew()
+    return -ret.rolling(window).skew()
 
-def calc_jump_kurtosis(close, window=20):
-    """
-    收益峰度因子：峰度高表示存在极端收益（跳跃）
-    因子越大 = 存在价格跳跃 = 越可能高估
-    """
-    ret = close.pct_change()
-    return ret.rolling(window).kurt()
 
-def calc_jump_reversal_gap(close, window=20):
-    """
-    跳跃反转缺口因子：近期高点与长期均线的偏离
-    因子越大 = 跳跃后处于高位 = 越可能高估
-    """
-    ma_long = close.rolling(window*3).mean()      # 60日均线
-    recent_high = close.rolling(window).max()     # 20日高点
-    return (recent_high - ma_long) / ma_long
 
-def calc_jump_concentration(close, window=20):
-    """
-    跳跃集中度因子：收益是否集中在少数几天（top5收益占比）
-    因子越大 = 收益由少数跳跃日贡献 = 越可能高估
-    """
-    ret = close.pct_change()
-    total_ret = ret.rolling(window).sum().abs()
-    # 计算窗口内最大5日收益之和
-    def top5_sum(x):
-        if len(x) >= 5:
-            return np.sum(np.sort(x)[-5:])   # 取最大的5个
-        else:
-            return np.sum(x)
-    top5_ret = ret.rolling(window).apply(top5_sum, raw=True)
-    return top5_ret / total_ret.replace(0, np.nan)
 
-def calc_jump_overnight_gap(close, window=20):
-    """
-    隔夜跳空因子：用收益绝对值的滚动均值模拟跳空程度
-    因子越大 = 隔夜跳空频繁且大 = 越可能高估
-    """
-    ret = close.pct_change()
-    return ret.abs().rolling(window).mean()
 
-def calc_jump_recovery_speed(close, window=20):
-    """
-    跳跃恢复速度因子：大跌后恢复越快 = 可能越虚高
-    因子越大 = 异常恢复能力强 = 越可能高估
-    """
-    ret = close.pct_change()
-    crash_day = ret < -0.05                     # 大跌日（跌幅>5%）
-    future_5d_ret = close.shift(-5) / close - 1  # 未来5日收益率
-    recovery = future_5d_ret.where(crash_day, 0)
-    return recovery.rolling(window).mean()
+
+
 
 # 将因子收集到一个字典中，方便循环调用
 FACTORS = {
-    "jump_intensity": calc_jump_intensity,
+    "jump_bipower": calc_jump_bipower,
     "jump_momentum": calc_jump_momentum,
     "jump_volatility_ratio": calc_jump_volatility_ratio,
     "jump_skewness": calc_jump_skewness,
-    "jump_kurtosis": calc_jump_kurtosis,
-    "jump_reversal_gap": calc_jump_reversal_gap,
-    "jump_concentration": calc_jump_concentration,
-    "jump_overnight_gap": calc_jump_overnight_gap,
-    "jump_recovery_speed": calc_jump_recovery_speed,
 }
 
 # ==================== 因子处理函数 ====================
@@ -199,11 +161,9 @@ def run_backtest(factor, forward_ret, rebalance_freq='M',
     if rebalance_freq == 'D':
         rebalance_dates = all_dates
     elif rebalance_freq == 'W':
-        # 每周第一个交易日（周一，若周一非交易日则取下一个交易日）
         week_starts = pd.date_range(start=all_dates[0], end=all_dates[-1], freq='W-MON')
         rebalance_dates = week_starts.intersection(all_dates)
     elif rebalance_freq == 'M':
-        # 每月第一个交易日
         month_starts = pd.date_range(start=all_dates[0], end=all_dates[-1], freq='BMS')
         rebalance_dates = month_starts.intersection(all_dates)
     else:
@@ -235,11 +195,11 @@ def run_backtest(factor, forward_ret, rebalance_freq='M',
 
         w = pd.Series(0.0, index=factor_t.index)
         if len(pos) > 0:
-            w_pos = pos / pos.sum()          # 多头按正偏离比例分配
+            w_pos = pos / pos.sum()          # 多头按正偏离比例分配，权重和为1
             w.loc[pos.index] = w_pos
         if len(neg) > 0:
-            w_neg = neg / neg.sum()          # 空头按负偏离比例分配（负值）
-            w.loc[neg.index] = w_neg
+            w_neg = neg / neg.sum()          # 注意：neg为负，neg.sum()为负，所以w_neg为正
+            w.loc[neg.index] = -w_neg        # 修正：空头权重设为负数，实现多空市值相等
 
         if len(hold_dates) > 0:
             weights.loc[hold_dates, w.index] = w.values
